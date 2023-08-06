@@ -63,7 +63,7 @@ function train() {
         --lgs_mapping 'java:java_sa,python:python_sa' \
         --amp 2 \
         --fp16 True \
-        --batch_size 8 \
+        --batch_size 2 \
         --accumulate_gradients 1 \
         --epoch_size 2000 \
         --max_epoch 20 \
@@ -96,7 +96,7 @@ function program_translation_ngram_evaluation() {
         --BPE_path $BPE_PATH \
         --input_file $INPUT_FILE \
         --output_file $FILE_PREF.output \
-        --batch_size 8 \
+        --batch_size 2 \
         --beam_size 10
 
     python $evaluator_script/evaluator.py \
@@ -159,7 +159,7 @@ function function_translation_ngram_evaluation() {
         --BPE_path $BPE_PATH \
         --input_file $INPUT_FILE \
         --output_file $FILE_PREF.output \
-        --batch_size 8 \
+        --batch_size 2 \
         --beam_size 10
 
     python $evaluator_script/evaluator.py \
