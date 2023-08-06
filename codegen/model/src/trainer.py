@@ -230,52 +230,52 @@ class Trainer(object):
         self.scaler = amp.GradScaler(enabled=params.fp16)
 
 
-def optimize(self, loss):
-    """
-    Optimize.
-    """
-    # check NaN
-    if (loss != loss).data.any():
-        logger.warning("NaN detected")
-        # exit()
+    def optimize(self, loss):
+        """
+        Optimize.
+        """
+        # check NaN
+        if (loss != loss).data.any():
+            logger.warning("NaN detected")
+            # exit()
 
-    params = self.params
+        params = self.params
 
-    # optimizers
-    names = self.optimizers.keys()
-    optimizers = [self.optimizers[k] for k in names]
+        # optimizers
+        names = self.optimizers.keys()
+        optimizers = [self.optimizers[k] for k in names]
 
-    # Regular optimization (without AMP)
-    if params.amp == -1:
-        for optimizer in optimizers:
-            optimizer.zero_grad()
-        loss.backward()
-        if params.clip_grad_norm > 0:
-            for name in names:
-                clip_grad_norm_(self.parameters[name], params.clip_grad_norm)
-        for optimizer in optimizers:
-            optimizer.step()
-
-    # AMP optimization
-    else:
-        if self.n_iter % params.accumulate_gradients == 0:
-            # Use scaler for AMP
-            self.scaler.scale(loss).backward()
-
-            # Gradient clipping
+        # Regular optimization (without AMP)
+        if params.amp == -1:
+            for optimizer in optimizers:
+                optimizer.zero_grad()
+            loss.backward()
             if params.clip_grad_norm > 0:
                 for name in names:
-                    # Using native PyTorch for gradient clipping
                     clip_grad_norm_(self.parameters[name], params.clip_grad_norm)
-
-            # Optimizer step and zeroing gradients
             for optimizer in optimizers:
-                self.scaler.step(optimizer)
-                self.scaler.update()
-                optimizer.zero_grad()
+                optimizer.step()
+
+        # AMP optimization
         else:
-            # If accumulating gradients, only perform backward pass
-            self.scaler.scale(loss).backward()
+            if self.n_iter % params.accumulate_gradients == 0:
+                # Use scaler for AMP
+                self.scaler.scale(loss).backward()
+
+                # Gradient clipping
+                if params.clip_grad_norm > 0:
+                    for name in names:
+                        # Using native PyTorch for gradient clipping
+                        clip_grad_norm_(self.parameters[name], params.clip_grad_norm)
+
+                # Optimizer step and zeroing gradients
+                for optimizer in optimizers:
+                    self.scaler.step(optimizer)
+                    self.scaler.update()
+                    optimizer.zero_grad()
+            else:
+                # If accumulating gradients, only perform backward pass
+                self.scaler.scale(loss).backward()
 
     def iter(self):
         """
