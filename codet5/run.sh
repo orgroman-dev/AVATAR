@@ -36,7 +36,7 @@ function train() {
 
     NUM_TRAIN_EPOCHS=20
     lr=5e-5
-    TRAIN_BATCH_SIZE=32 # per_gpu_train_bsz * num_gpu
+    TRAIN_BATCH_SIZE=4 # per_gpu_train_bsz * num_gpu
     GRAD_ACCUM_STEP=1   # effective_bsz = train_bsz * grad_accum_steps
 
     python run_gen.py \
@@ -59,7 +59,7 @@ function train() {
         --res_dir $SAVE_DIR \
         --train_batch_size $TRAIN_BATCH_SIZE \
         --gradient_accumulation_steps $GRAD_ACCUM_STEP \
-        --eval_batch_size 8 \
+        --eval_batch_size 2 \
         --max_source_length $source_length \
         --max_target_length $target_length \
         --beam_size 10 \
@@ -90,7 +90,7 @@ function program_translation_ngram_evaluation() {
         --max_source_length $source_length \
         --max_target_length $target_length \
         --beam_size 10 \
-        --eval_batch_size 8 \
+        --eval_batch_size 2 \
         2>&1 | tee ${SAVE_DIR}/evaluation.log
 
     python $evaluator_script/evaluator.py \
@@ -155,7 +155,7 @@ function function_translation_ngram_evaluation() {
         --max_source_length $source_length \
         --max_target_length $target_length \
         --beam_size 10 \
-        --eval_batch_size 8 \
+        --eval_batch_size 2 \
         2>&1 | tee ${SAVE_DIR}/evaluation.log
 
     python $evaluator_script/evaluator.py \
