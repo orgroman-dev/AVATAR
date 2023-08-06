@@ -11,9 +11,10 @@ import time
 from collections import OrderedDict
 from logging import getLogger
 
-import apex
 import numpy as np
 import torch
+import torch.cuda.amp as amp
+
 from torch import nn
 from torch.nn.utils import clip_grad_norm_
 
@@ -81,7 +82,7 @@ class Trainer(object):
         if params.amp >= 0:
             self.init_amp()
             if params.multi_gpu:
-                logger.info("Using apex.parallel.DistributedDataParallel ...")
+                logger.info("Using torch.parallel.DistributedDataParallel ...")
                 for name in self.MODEL_NAMES:
                     model_attr = getattr(self, name)
                     if isinstance(model_attr, list):
@@ -89,7 +90,7 @@ class Trainer(object):
                             self,
                             name,
                             [
-                                apex.parallel.DistributedDataParallel(
+                                torch.nn.parallel.DistributedDataParallel(
                                     model, delay_allreduce=True
                                 )
                                 for model in model_attr
@@ -99,7 +100,7 @@ class Trainer(object):
                         setattr(
                             self,
                             name,
-                            apex.parallel.DistributedDataParallel(
+                            torch.nn.parallel.DistributedDataParallel(
                                 model_attr, delay_allreduce=True
                             ),
                         )
@@ -215,7 +216,7 @@ class Trainer(object):
 
     def init_amp(self):
         """
-        Initialize AMP optimizer.
+        Initialize AMP scaler.
         """
         params = self.params
         assert (
@@ -224,89 +225,57 @@ class Trainer(object):
                 or params.amp in [1, 2, 3]
                 and params.fp16 is True
         )
-        opt_names = self.optimizers.keys()
-        models = [
-            model
-            for name in self.MODEL_NAMES
-            for model in (
-                getattr(self, name)
-                if isinstance(getattr(self, name), list)
-                else [getattr(self, name)]
-            )
-        ]
-        models, optimizers = apex.amp.initialize(
-            models,
-            [self.optimizers[k] for k in opt_names],
-            opt_level=("O%i" % params.amp),
-        )
-        current_index = 0
-        for name in self.MODEL_NAMES:
-            model_attr = getattr(self, name)
-            if isinstance(model_attr, list):
-                models_length = len(model_attr)
-                setattr(
-                    self, name, models[current_index: current_index + models_length]
-                )
-                current_index += models_length
-            else:
-                setattr(self, name, models[current_index])
-                current_index += 1
-        assert current_index == len(models)
-        self.optimizers = {
-            opt_name: optimizer for opt_name, optimizer in zip(opt_names, optimizers)
-        }
 
-    def optimize(self, loss):
-        """
-        Optimize.
-        """
-        # check NaN
-        if (loss != loss).data.any():
-            logger.warning("NaN detected")
-            # exit()
+        # Initialize a gradient scaler for automatic mixed precision
+        self.scaler = amp.GradScaler(enabled=params.fp16)
 
-        params = self.params
 
-        # optimizers
-        names = self.optimizers.keys()
-        optimizers = [self.optimizers[k] for k in names]
+def optimize(self, loss):
+    """
+    Optimize.
+    """
+    # check NaN
+    if (loss != loss).data.any():
+        logger.warning("NaN detected")
+        # exit()
 
-        # regular optimization
-        if params.amp == -1:
-            for optimizer in optimizers:
-                optimizer.zero_grad()
-            loss.backward()
+    params = self.params
+
+    # optimizers
+    names = self.optimizers.keys()
+    optimizers = [self.optimizers[k] for k in names]
+
+    # Regular optimization (without AMP)
+    if params.amp == -1:
+        for optimizer in optimizers:
+            optimizer.zero_grad()
+        loss.backward()
+        if params.clip_grad_norm > 0:
+            for name in names:
+                clip_grad_norm_(self.parameters[name], params.clip_grad_norm)
+        for optimizer in optimizers:
+            optimizer.step()
+
+    # AMP optimization
+    else:
+        if self.n_iter % params.accumulate_gradients == 0:
+            # Use scaler for AMP
+            self.scaler.scale(loss).backward()
+
+            # Gradient clipping
             if params.clip_grad_norm > 0:
                 for name in names:
-                    # norm_check_a = (sum([p.grad.norm(p=2).item() ** 2 for p in self.parameters[name]])) ** 0.5
+                    # Using native PyTorch for gradient clipping
                     clip_grad_norm_(self.parameters[name], params.clip_grad_norm)
-                    # norm_check_b = (sum([p.grad.norm(p=2).item() ** 2 for p in self.parameters[name]])) ** 0.5
-                    # print(name, norm_check_a, norm_check_b)
-            for optimizer in optimizers:
-                optimizer.step()
 
-        # AMP optimization
+            # Optimizer step and zeroing gradients
+            for optimizer in optimizers:
+                self.scaler.step(optimizer)
+                self.scaler.update()
+                optimizer.zero_grad()
         else:
-            if self.n_iter % params.accumulate_gradients == 0:
-                with apex.amp.scale_loss(loss, optimizers) as scaled_loss:
-                    scaled_loss.backward()
-                if params.clip_grad_norm > 0:
-                    for name in names:
-                        # norm_check_a = (sum([p.grad.norm(p=2).item() ** 2 for p in apex.amp.master_params(self.optimizers[name])])) ** 0.5
-                        clip_grad_norm_(
-                            apex.amp.master_params(self.optimizers[name]),
-                            params.clip_grad_norm,
-                        )
-                        # norm_check_b = (sum([p.grad.norm(p=2).item() ** 2 for p in apex.amp.master_params(self.optimizers[name])])) ** 0.5
-                        # print(name, norm_check_a, norm_check_b)
-                for optimizer in optimizers:
-                    optimizer.step()
-                    optimizer.zero_grad()
-            else:
-                with apex.amp.scale_loss(
-                        loss, optimizers, delay_unscale=True
-                ) as scaled_loss:
-                    scaled_loss.backward()
+            # If accumulating gradients, only perform backward pass
+            self.scaler.scale(loss).backward()
 
     def iter(self):
         """
@@ -803,37 +772,22 @@ class Trainer(object):
 
         # reload optimizers
         for name in self.optimizers.keys():
-            if (
-                    False
-            ):  # AMP checkpoint reloading is buggy, we cannot do that - TODO: fix - https://github.com/NVIDIA/apex/issues/250
-                logger.warning(f"Reloading checkpoint optimizer {name} ...")
-                self.optimizers[name].load_state_dict(data[f"{name}_optimizer"])
-            else:  # instead, we only reload current iterations / learning rates
-                logger.warning(f"Not reloading checkpoint optimizer {name}.")
-                for group_id, param_group in enumerate(
-                        self.optimizers[name].param_groups
-                ):
-                    if "num_updates" not in param_group:
-                        logger.warning(f"No 'num_updates' for optimizer {name}.")
-                        continue
-                    logger.warning(
-                        f"Reloading 'num_updates' and 'lr' for optimizer {name}."
-                    )
-                    param_group["num_updates"] = data[f"{name}_optimizer"][
-                        "param_groups"
-                    ][group_id]["num_updates"]
-                    param_group["lr"] = self.optimizers[name].get_lr_for_step(
-                        param_group["num_updates"]
-                    )
+            logger.warning(f"Not reloading checkpoint optimizer {name}.")
+            for group_id, param_group in enumerate(self.optimizers[name].param_groups):
+                if "num_updates" not in param_group:
+                    logger.warning(f"No 'num_updates' for optimizer {name}.")
+                    continue
+                logger.warning(f"Reloading 'num_updates' and 'lr' for optimizer {name}.")
+                param_group["num_updates"] = data[f"{name}_optimizer"]["param_groups"][group_id]["num_updates"]
+                # Assuming 'get_lr_for_step' is a method to get learning rate for a specific step, otherwise adjust accordingly
+                param_group["lr"] = self.optimizers[name].get_lr_for_step(param_group["num_updates"])
 
         # reload main metrics
         self.epoch = data["epoch"] + 1
         self.n_total_iter = data["n_total_iter"]
         self.best_metrics = data["best_metrics"]
         self.best_stopping_criterion = data["best_stopping_criterion"]
-        logger.warning(
-            f"Checkpoint reloaded. Resuming at epoch {self.epoch} / iteration {self.n_total_iter} ..."
-        )
+        logger.warning(f"Checkpoint reloaded. Resuming at epoch {self.epoch} / iteration {self.n_total_iter} ...")
 
     def save_periodic(self):
         """
