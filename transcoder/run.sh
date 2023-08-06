@@ -42,7 +42,7 @@ function train() {
     mkdir -p $SAVE_DIR
 
     export PYTHONPATH=$CODE_DIR_HOME
-    python -m torch.distributed.launch --nproc_per_node=$NGPU $TRAIN_SCRIPT \
+    torchrun --nproc_per_node=$NGPU $TRAIN_SCRIPT \
         --exp_name $EXP_NAME \
         --exp_id $EXP_ID \
         --dump_path $SAVE_DIR \
