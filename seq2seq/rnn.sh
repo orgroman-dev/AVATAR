@@ -58,7 +58,7 @@ function train() {
         --adam-betas "(0.9, 0.999)" \
         --adam-eps 1e-08 \
         --clip-norm 1.0 \
-        --lr-scheduler polynomial_decay \
+        --lr-scheduler inverse_sqrt \
         --lr 1e-03 \
         --max-update $MAX_UPDATES \
         --batch-size $BATCH_SIZE \
