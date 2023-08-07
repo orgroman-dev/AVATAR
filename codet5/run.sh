@@ -12,12 +12,12 @@ prog_test_case_dir="${CODE_DIR_HOME}/test_cases"
 GPU=${1:-0}
 SOURCE=${2:-java}
 TARGET=${3:-python}
+pretrained_model=${4:-Salesforce/codet5-base}
+tokenizer_name=${5:-Salesforce/codet5-base}
 
 export CUDA_VISIBLE_DEVICES=$GPU
 echo "Source: $SOURCE Target: $TARGET"
 
-pretrained_model=Salesforce/codet5-base
-tokenizer_name=Salesforce/codet5-base
 source_length=510
 target_length=510
 
@@ -36,7 +36,9 @@ function train() {
 
     NUM_TRAIN_EPOCHS=20
     lr=5e-5
-    TRAIN_BATCH_SIZE=4 # per_gpu_train_bsz * num_gpu
+
+    EVAL_BATCH_SIZE=${7:-2}
+    TRAIN_BATCH_SIZE=${6:-4} # per_gpu_train_bsz * num_gpu
     GRAD_ACCUM_STEP=1   # effective_bsz = train_bsz * grad_accum_steps
 
     python run_gen.py \
@@ -59,7 +61,7 @@ function train() {
         --res_dir $SAVE_DIR \
         --train_batch_size $TRAIN_BATCH_SIZE \
         --gradient_accumulation_steps $GRAD_ACCUM_STEP \
-        --eval_batch_size 2 \
+        --eval_batch_size $EVAL_BATCH_SIZE \
         --max_source_length $source_length \
         --max_target_length $target_length \
         --beam_size 10 \
