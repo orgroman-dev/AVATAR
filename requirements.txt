@@ -19,3 +19,4 @@ tensorboard
 sentencepiece
 tensorboardX
 sacrebleu
+tree-sitter
