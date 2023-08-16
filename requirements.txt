@@ -20,3 +20,4 @@ sentencepiece
 tensorboardX
 sacrebleu
 tree-sitter
+pytorch-lightning
