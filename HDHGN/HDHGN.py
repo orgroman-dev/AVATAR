@@ -6,7 +6,7 @@ from torch_geometric.nn import HeteroLinear, MLP
 from torch_geometric.utils import softmax
 from torch_scatter import scatter_add
 
-from models.layers import HeteroEmbedding, HDHGConv
+from .layers import HeteroEmbedding, HDHGConv
 
 
 class HDHGN(nn.Module):
