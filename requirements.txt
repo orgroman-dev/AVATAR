@@ -21,3 +21,4 @@ tensorboardX
 sacrebleu
 tree-sitter
 pytorch-lightning
+rvnn
